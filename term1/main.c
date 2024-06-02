@@ -107,7 +107,7 @@ typedef struct IOBurst {
 } IOBurst;
 
 typedef struct Process {
-    int number, PID, arrival, priority, turnaroundTime, waitingTime, lastAdded; // lastAdded is used only for Round Robin
+    int number, PID, arrival, priority, turnaroundTime, waitingTime, lastAddedToReadyQueue;
     CPUBurst CPUburst;
     IOBurst IOburst;
 } Process;
@@ -156,7 +156,7 @@ ReadyQueue readyQueue_init(const SchedulingPolicy schedulingPolicy);
 bool readyQueue_empty(const ReadyQueue);
 ReadyQueueNode* readyQueue_front(const ReadyQueue);
 int readyQueue_compare(const ReadyQueue, const Process *const, const Process *const);
-void readyQueue_push(ReadyQueue *const, Process *const);
+void readyQueue_push(ReadyQueue *const, Process *const, const int);
 Process* readyQueue_pop(ReadyQueue *const);
 
 int inputString(const char *const, char *const);
@@ -259,7 +259,7 @@ int main() {
                             .schedulingPolicy = inputSchedulingPolicy(simulationBatchPtr->usedSchedulingMode) // the user inputs a scheduling mode
                         };
 
-                        // copies processData to simulationPtr->processData
+                        // copies simulationBatchPtr->processData to simulationPtr->processData
                         for (Node *node = simulationBatchPtr->processData.processList.front; node != NULL; node = node->nxt) {
                             Process *const process = (Process*)malloc(sizeof(Process));
                             
@@ -425,39 +425,36 @@ int readyQueue_compare(const ReadyQueue readyQueue, const Process *const p1, con
 
     switch (schedulingPolicy.schedulingMode) {
         case FCFS:
-            if (p1->arrival == p2->arrival) return p1->number < p2->number;
-            return p1->arrival < p2->arrival;
+            if (p1->arrival != p2->arrival) return p1->arrival < p2->arrival;
+            break;
         case NON_PREEMPTIVE_SJF:
         case PREEMPTIVE_SJF:
-            if (p1->CPUburst.remaining == p2->CPUburst.remaining) return p1->number < p2->number;
-            return p1->CPUburst.remaining < p2->CPUburst.remaining;
+            if (p1->CPUburst.remaining != p2->CPUburst.remaining) return p1->CPUburst.remaining < p2->CPUburst.remaining;
+            break;
         case NON_PREEMPTIVE_PRIORITY:
         case PREEMPRIVE_PRIORITY:
-            if (schedulingPolicy.priorityDirection == ASCENDING) {
-                if (p1->priority == p2->priority) return p1->number < p2->number;
-                return p1->priority < p2->priority;
-            }
-            else {
-                if (p1->priority == p2->priority) return p1->number > p2->number;
-                return p1->priority > p2->priority;
-            }
+            if (p1->priority != p2->priority) return schedulingPolicy.priorityDirection == ASCENDING ? p1->priority < p2->priority : p1->priority > p2->priority;
+            break;
         case ROUND_ROBIN:
-            if (p1->lastAdded == p2->lastAdded) {
-                if (p1->lastAdded == p1->arrival && p2->lastAdded == p2->arrival) return p1->number < p2->number;
-                else if (p1->lastAdded == p1->arrival) return true;
-                else if (p1->lastAdded == p1->arrival) return false;
-                else return p1->number < p2->number;
-            }
-            return p1->lastAdded < p2->lastAdded;
+            break;
         default:
             fprintf(stderr, "ERROR: UNDEFINED SCHEDULING MODE DETECTED IN COMPARING\n");
             exit(1);
     }
+    // tie breaker
+    if (p1->lastAddedToReadyQueue == p2->lastAddedToReadyQueue) {
+        if (p1->lastAddedToReadyQueue == p1->arrival && p2->lastAddedToReadyQueue == p2->arrival) return p1->number < p2->number;
+        else if (p1->lastAddedToReadyQueue == p1->arrival) return true;
+        else if (p2->lastAddedToReadyQueue == p2->arrival) return false;
+        else return p1->number < p2->number;
+    }
+    return p1->lastAddedToReadyQueue < p2->lastAddedToReadyQueue;
 }
 
-void readyQueue_push(ReadyQueue *const readyQueue, Process *const process) {
+void readyQueue_push(ReadyQueue *const readyQueue, Process *const process, const int t) {
     ReadyQueueNode *const tmp = (ReadyQueueNode*)malloc(sizeof(ReadyQueueNode));
 
+    process->lastAddedToReadyQueue = t;
     tmp->process = process;
     tmp->left = tmp->right = tmp->parent = NULL;
     if (readyQueue_empty(*readyQueue)) readyQueue->root = tmp;
@@ -775,7 +772,7 @@ Process* inputProcess(const int number, bool isPIDoccupied[]) {
     Process *const ret = (Process*)malloc(sizeof(Process));
 
     ret->number = number;
-    ret->turnaroundTime = ret->waitingTime = ret->lastAdded = -1;
+    ret->turnaroundTime = ret->waitingTime = ret->lastAddedToReadyQueue = -1;
     printf("< P%d's data options >\n", ret->number);
     printf("[1] input manually\n");
     printf("[2] input randomly\n");
@@ -1024,10 +1021,9 @@ void simulate(Simulation *ret) {
                 Node *tmp = node->nxt;
 
                 ++(process->IOburst.idx);
-                if (schedulingPolicy.isTimeoutMode) process->lastAdded = t; // for Round Robin
-                readyQueue_push(&readyQueue, process);
-                // printf("t=%d: P%d is added to ready queue from waiting queue\n", t, process->number);
+                readyQueue_push(&readyQueue, process, t);
                 list_pop(&waitingQueue, node);
+                // printf("t=%d: P%d is added to ready queue from waiting queue\n", t, process->number);
                 node = tmp;
             }
             else node = node->nxt;
@@ -1038,9 +1034,8 @@ void simulate(Simulation *ret) {
             Process *process = (Process*)(node->data);
 
             if (t == process->arrival) {
-                if (schedulingPolicy.isTimeoutMode) process->lastAdded = t; // for Round Robin
+                readyQueue_push(&readyQueue, process, t);
                 // printf("t=%d: P%d is added to ready queue\n", t, process->number);
-                readyQueue_push(&readyQueue, process);
             }
         }
 
@@ -1054,9 +1049,11 @@ void simulate(Simulation *ret) {
             // if there is a process running on CPU and preemptive mode is activated
             else if (schedulingPolicy.isPreemptiveMode) {
                 // checks preemption
-                if (readyQueue_compare(readyQueue, readyQueue_front(readyQueue)->process, running)) {
-                    // printf("t=%d: P%d is preempted by %d\n", t, running->number, readyQueue_front(readyQueue)->process->number);
-                    readyQueue_push(&readyQueue, running);
+                Process *const tmp = readyQueue_front(readyQueue)->process;
+
+                if (readyQueue_compare(readyQueue, tmp, running)) {
+                    readyQueue_push(&readyQueue, running, t);
+                    // printf("t=%d: P%d is preempted by %d\n", t, running->number, tmp->number);
                     running = readyQueue_pop(&readyQueue);
                 }
             }
@@ -1089,14 +1086,14 @@ void simulate(Simulation *ret) {
                 running->turnaroundTime = t + 1 - running->arrival;
                 running->waitingTime = t + 1 - running->arrival - running->CPUburst.burst;
                 for (int i = 0; i < running->IOburst.num; i++) running->waitingTime -= running->IOburst.io[i].burst;
-                ((GanttData*)(ret->GanttList.rear->data))->end = t + 1;
+                ((GanttData*)(ret->GanttList.rear->data))->end = t + 1; // assign the ending time
                 running = NULL;
             }
             // if the process is still running on CPU, checks if the process needs to be relocated to the waiting queue
             else if (running->IOburst.num > 0 && running->IOburst.idx < running->IOburst.num) {
                 if (--(running->IOburst.io[running->IOburst.idx].remaining1) == 0) {
-                    // printf("t=%d: P%d is added to waiting queue from CPU\n", t + 1, running->number);
                     list_push(&waitingQueue, running);
+                    // printf("t=%d: P%d is added to waiting queue from CPU\n", t + 1, running->number);
                     ((GanttData*)(ret->GanttList.rear->data))->end = t + 1; // assign the ending time
                     running = NULL;
                 }
@@ -1105,9 +1102,8 @@ void simulate(Simulation *ret) {
             if (running == NULL) timer = schedulingPolicy.timeQuantum;
             else {
                 if (schedulingPolicy.isTimeoutMode && --timer == 0) {
-                    running->lastAdded = t + 1;
+                    readyQueue_push(&readyQueue, running, t + 1);
                     // printf("t=%d: P%d is timed out\n", t + 1, running->number);
-                    readyQueue_push(&readyQueue, running);
                     running = NULL;
                     timer = schedulingPolicy.timeQuantum;
                 }

@@ -309,17 +309,21 @@ int main() {
 
                     FILE *tmp = fopen(filename, "r");
 
+                    bool flag = false;
+
                     if (tmp != NULL) { // if there is an existing file with the same name, asks the user whether to overwrite or not
                         fclose(tmp);
                         printf("* input y to overwrite the existing file(otherwise, input n)\n");
-                        if (!inputYesNo("your input: ")) break;
+                        if (!inputYesNo("your input: ")) flag = true;
                         printf("\n");
                     }
 
-                    FILE *fp = fopen(filename, "w");
+                    if (!flag) {
+                        FILE *fp = fopen(filename, "w");
 
-                    showSimulationBatchResult(*simulationBatch, fp);
-                    fclose(fp);
+                        showSimulationBatchResult(*simulationBatch, fp);
+                        fclose(fp);
+                    }
                 }
             }
         }
@@ -1156,6 +1160,7 @@ SimulationBatch* selectSimulationBatch(const List simulationBatchList) {
 int intDigits(const int n) {
     int tmp = n, ret = 0;
 
+    if (!n) return 1;
     while (tmp) {
         tmp /= 10;
         ++ret;
@@ -1201,47 +1206,63 @@ void showGanttChart(const List GanttList, const bool allowRedundancy, const bool
 
         for (Node *node = begin; node != NULL && (!allowNewline || allowNewline && cnt <= gantt_chart_width); nextLine = node = node->nxt) {
             const GanttData *const curGanttData = (GanttData*)(node->data);
-
-            if (node == begin) {
-                fprintf(_Stream, "|");
-                ++cnt;
-            }
-            printCharSequence('=', intDigits(curGanttData->start) - 1, _Stream);
-            cnt += intDigits(curGanttData->start) - 1;
-            printCharSequence('=', 1, _Stream);
+            
+            fprintf(_Stream, " ");
             ++cnt;
-            if (curGanttData->number == -1) {
-                printCharSequence('=', 1, _Stream);
-                ++cnt;
+
+            int space, lspace, rspace;
+
+            if ((curGanttData->number == -1 ? 3 : intDigits(curGanttData->number) + 3) < intDigits(curGanttData->start)) {
+                space = intDigits(curGanttData->start) - (curGanttData->number == -1 ? 1 : intDigits(curGanttData->number) + 1);
+                space += space % 2;
+                lspace = space / 2, rspace = space - lspace;
             }
             else {
-                printCharSequence('=', intDigits(curGanttData->number) + 1, _Stream);
-                cnt += intDigits(curGanttData->number) + 1;
+                space = 2;
+                lspace = rspace = 1;
             }
+            printCharSequence(' ', lspace, _Stream);
+            if (curGanttData->number == -1) fprintf(_Stream, " ");
+            else fprintf(_Stream, "P%d", curGanttData->number);
+            printCharSequence(' ', rspace, _Stream);
+            
+            cnt += space + (curGanttData->number == -1 ? 1 : intDigits(curGanttData->number) + 1) + 1;
 
             if (!allowRedundancy) while (node->nxt != NULL && ((GanttData*)(node->data))->number == ((GanttData*)(node->nxt->data))->number) node = node->nxt;
-
-            printCharSequence('=', 1, _Stream);
-            ++cnt;
-            fprintf(_Stream, "|");
-            ++cnt;
         }
         fprintf(_Stream, "\n");
         for (Node *node = begin; node != nextLine; node = node->nxt) {
-            if (!allowRedundancy && node != begin) while (node != NULL && ((GanttData*)(node->data))->number == ((GanttData*)(node->prev->data))->number) node = node->nxt;
-
             const GanttData *const curGanttData = (GanttData*)(node->data);
 
-            if (node == begin) fprintf(_Stream, "%d ", curGanttData->start);
+            if (node == begin) fprintf(_Stream, "|");
 
-            if (curGanttData->number == -1) fprintf(_Stream, "  ");
-            else fprintf(_Stream, "P%d ", curGanttData->number);
+            int space;
 
-            if (!allowRedundancy) {
-                while (node->nxt != NULL && ((GanttData*)(node->data))->number == ((GanttData*)(node->nxt->data))->number) node = node->nxt;
-                fprintf(_Stream, "%d ", ((GanttData*)(node->data))->end);
-            }
-            else fprintf(_Stream, "%d ", curGanttData->end);
+            if ((curGanttData->number == -1 ? 3 : intDigits(curGanttData->number) + 3) < intDigits(curGanttData->start)) space = intDigits(curGanttData->start) - (curGanttData->number == -1 ? 1 : intDigits(curGanttData->number) + 1);
+            else space = 2;
+            space += space % 2;
+
+            printCharSequence('=', (curGanttData->number == -1 ? 1 : intDigits(curGanttData->number) + 1) + space, _Stream);
+
+            if (!allowRedundancy) while (node->nxt != NULL && ((GanttData*)(node->data))->number == ((GanttData*)(node->nxt->data))->number) node = node->nxt;
+            fprintf(_Stream, "|");
+        }
+        fprintf(_Stream, "\n");
+        for (Node *node = begin; node != nextLine; node = node->nxt) {
+            const GanttData *const curGanttData = (GanttData*)(node->data);
+
+            fprintf(_Stream, "%d", curGanttData->start);
+
+            int space;
+
+            if ((curGanttData->number == -1 ? 3 : intDigits(curGanttData->number) + 3) < intDigits(curGanttData->start)) space = intDigits(curGanttData->start) - (curGanttData->number == -1 ? 1 : intDigits(curGanttData->number) + 1);
+            else space = 2;
+            space += space % 2;
+
+            printCharSequence(' ', (curGanttData->number == -1 ? 1 : intDigits(curGanttData->number) + 1) + space - (intDigits(curGanttData->start) - 1), _Stream);
+
+            if (!allowRedundancy) while (node->nxt != NULL && ((GanttData*)(node->data))->number == ((GanttData*)(node->nxt->data))->number) node = node->nxt;
+            if (node->nxt == nextLine) fprintf(_Stream, "%d", ((GanttData*)(node->data))->end);
         }
         fprintf(_Stream, "\n");
         begin = nextLine;

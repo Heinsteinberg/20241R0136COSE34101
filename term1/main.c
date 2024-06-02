@@ -19,7 +19,7 @@
 #define PREEMPRIVE_PRIORITY 4
 #define ROUND_ROBIN 5
 
-const char* schedulingModeVector[] = {
+const char *const schedulingModeVector[] = {
     "FCFS",
     "Non-Preemptive SJF",
     "Preemptive SJF",
@@ -75,6 +75,7 @@ int max_io_burst = 30;
 #define MIN_GANTT_CHART_WIDTH 0
 #define MAX_GANTT_CHART_WIDTH 1000
 int gantt_chart_width = 80;
+bool allow_redundancy = true;
 
 typedef struct Node {
     struct Node *prev, *nxt;
@@ -187,13 +188,13 @@ void showProcessInfo(const Process, const bool, FILE *const);
 void showProcessesInfo(const List, const bool, const bool, FILE *const);
 int intDigits(const int);
 void printCharSequence(const char, const int, FILE *const);
-void showGanttChart(const List, const bool, FILE *const);
+void showGanttChart(const List, const bool, const bool, FILE *const);
 void showEvaluation(const List, FILE *const);
 void showOverallEvaluation(const List simulationList, FILE *const);
 
 void showSimulationBatchResult(const SimulationBatch, FILE *const);
 
-void inputConfiguration(const char*, const int, int*, const int, int*);
+void inputConfiguration(const char *const, const int, int*, const int, int*);
 void configuration();
 
 int main() {
@@ -229,6 +230,7 @@ int main() {
             }
         }
         printf("\n");
+
         // conducts a simulation
         if (selection == 1) {
             if (isSimulationAmountExceeded) printf("* the amount of simulation results has exceeded its limitation(fixed to %d)!\n", MAX_NUM_OF_SIMULATIONS);
@@ -440,7 +442,12 @@ int readyQueue_compare(const ReadyQueue readyQueue, const Process *const p1, con
                 return p1->priority > p2->priority;
             }
         case ROUND_ROBIN:
-            if (p1->lastAdded == p2->lastAdded) return p1->number < p2->number;
+            if (p1->lastAdded == p2->lastAdded) {
+                if (p1->lastAdded == p1->arrival && p2->lastAdded == p2->arrival) return p1->number < p2->number;
+                else if (p1->lastAdded == p1->arrival) return true;
+                else if (p1->lastAdded == p1->arrival) return false;
+                else return p1->number < p2->number;
+            }
             return p1->lastAdded < p2->lastAdded;
         default:
             fprintf(stderr, "ERROR: UNDEFINED SCHEDULING MODE DETECTED IN COMPARING\n");
@@ -987,8 +994,8 @@ ProcessData* selectProcessData(List *const processDataList) {
         // goes back to home
         else if (input == 0) break;
         // selects an existing process data
-        else if (input > 0 && input <= processDataList->size) {
-            ret = (ProcessData*)(list_index(*processDataList, i - 1)->data);
+        else if (input >= 1 && input <= processDataList->size) {
+            ret = (ProcessData*)(list_index(*processDataList, input - 1)->data);
             break;
         }
     }
@@ -1056,7 +1063,7 @@ void simulate(Simulation *ret) {
         }
 
         // generates a segment of the Gantt chart
-        if (running != prev || t == 0 && running == NULL) {
+        if (running != prev || t == 0 && running == NULL || schedulingPolicy.isTimeoutMode && running != NULL && running == prev && timer == schedulingPolicy.timeQuantum) {
             if (!list_empty(ret->GanttList) && ((GanttData*)(ret->GanttList.rear->data))->end == -1) ((GanttData*)(ret->GanttList.rear->data))->end = t; // involutary context switching
             
             GanttData *const tmp = (GanttData*)malloc(sizeof(GanttData));
@@ -1189,7 +1196,7 @@ void printCharSequence(const char c, const int n, FILE *const _Stream) {
     for (int i = 1; i <= n; i++) fprintf(_Stream, "%c", c);
 }
 
-void showGanttChart(const List GanttList, const bool allowNewline, FILE *const _Stream) { // allowNewline for outputs overflowing the width of the window
+void showGanttChart(const List GanttList, const bool allowRedundancy, const bool allowNewline, FILE *const _Stream) { // allowNewline for outputs overflowing the width of the window
     Node *begin = GanttList.front, *nextLine = NULL;
 
     fprintf(_Stream, "* Gantt chart\n");
@@ -1215,6 +1222,9 @@ void showGanttChart(const List GanttList, const bool allowNewline, FILE *const _
                 printCharSequence('=', intDigits(curGanttData->number) + 1, _Stream);
                 cnt += intDigits(curGanttData->number) + 1;
             }
+
+            if (!allowRedundancy) while (node->nxt != NULL && ((GanttData*)(node->data))->number == ((GanttData*)(node->nxt->data))->number) node = node->nxt;
+
             printCharSequence('=', 1, _Stream);
             ++cnt;
             fprintf(_Stream, "|");
@@ -1222,6 +1232,8 @@ void showGanttChart(const List GanttList, const bool allowNewline, FILE *const _
         }
         fprintf(_Stream, "\n");
         for (Node *node = begin; node != nextLine; node = node->nxt) {
+            if (!allowRedundancy && node != begin) while (node != NULL && ((GanttData*)(node->data))->number == ((GanttData*)(node->prev->data))->number) node = node->nxt;
+
             const GanttData *const curGanttData = (GanttData*)(node->data);
 
             if (node == begin) fprintf(_Stream, "%d ", curGanttData->start);
@@ -1229,7 +1241,11 @@ void showGanttChart(const List GanttList, const bool allowNewline, FILE *const _
             if (curGanttData->number == -1) fprintf(_Stream, "  ");
             else fprintf(_Stream, "P%d ", curGanttData->number);
 
-            fprintf(_Stream, "%d ", curGanttData->end);
+            if (!allowRedundancy) {
+                while (node->nxt != NULL && ((GanttData*)(node->data))->number == ((GanttData*)(node->nxt->data))->number) node = node->nxt;
+                fprintf(_Stream, "%d ", ((GanttData*)(node->data))->end);
+            }
+            else fprintf(_Stream, "%d ", curGanttData->end);
         }
         fprintf(_Stream, "\n");
         begin = nextLine;
@@ -1301,14 +1317,14 @@ void showSimulationBatchResult(const SimulationBatch simulationBatch, FILE *cons
         if (schedulingPolicy.schedulingMode == NON_PREEMPTIVE_PRIORITY || schedulingPolicy.schedulingMode == PREEMPRIVE_PRIORITY) fprintf(_Stream, schedulingPolicy.priorityDirection == ASCENDING ? "(ascending order)" : "(descending order)");
         else if (schedulingPolicy.schedulingMode == ROUND_ROBIN) fprintf(_Stream, "(time quantum = %d)", schedulingPolicy.timeQuantum);
         fprintf(_Stream, "\n");
-        showGanttChart(simulation.GanttList, _Stream == stdout ? ALLOW_NEWLINE : NO_NEWLINE, _Stream);
+        showGanttChart(simulation.GanttList, allow_redundancy, _Stream == stdout ? ALLOW_NEWLINE : NO_NEWLINE, _Stream);
         showEvaluation(simulation.processData.processList, _Stream);
     }
     if (simulationBatch.simulationList.size > 1) showOverallEvaluation(simulationBatch.simulationList, _Stream);
 }
 
 // configures a value that contains maximum and minimum values
-void inputConfiguration(const char* s, const int MIN, int *minPtr, const int MAX, int *maxPtr) {
+void inputConfiguration(const char *const s, const int MIN, int *minPtr, const int MAX, int *maxPtr) {
     printf("< configuration of %s >\n", s);
 
     printf("<< min value >>\n");
@@ -1357,7 +1373,8 @@ void configuration() {
         printf("[5] priority: %d-%d\n", min_priority, max_priority);
         printf("[6] CPU-burst: %d-%d\n", min_cpu_burst, max_cpu_burst);
         printf("[7] IO-burst: %d-%d\n", min_io_burst, max_io_burst);
-        printf("[8] gantt chart width: %d\n", gantt_chart_width);
+        printf("[8] Gantt chart width: %d\n", gantt_chart_width);
+        printf("[9] redundancy in gantt chart: %s\n", allow_redundancy ? "true" : "false");
 
         const bool flag = max_num_of_processes > max_pid - min_pid + 1;
 
@@ -1366,7 +1383,7 @@ void configuration() {
         while (true) {
             int input = inputNaturalNumber("your input: ", NO_EMPTY_INPUT);
 
-            if (input >= 0 && input <= 8) {
+            if (input >= 0 && input <= 9) {
                 if (flag && !(input == 2 || input == 3)) {
                     printf("* select [2] or [3] to handle this issue!\n");
                     continue;
@@ -1385,7 +1402,7 @@ void configuration() {
             else if (selection == 5) inputConfiguration("priority", MIN_PRIORITY, &min_priority, MAX_PRIORITY, &max_priority);
             else if (selection == 6) inputConfiguration("CPU-burst", MIN_CPU_BURST, &min_cpu_burst, MAX_CPU_BURST, &max_cpu_burst);
             else if (selection == 7) inputConfiguration("IO-burst", MIN_IO_BURST, &min_io_burst, MAX_IO_BURST, &max_io_burst);
-            else {
+            else if (selection == 8) {
                 printf("< configuration of Gantt chart width >\n");
                 printf("* if a width of a row exceeds this value after adding a segment from the Gantt chart, remaining segments will be printed in the newline\n");
                 printf("* valid input range: %d-%d\n", MIN_GANTT_CHART_WIDTH, MAX_GANTT_CHART_WIDTH);
@@ -1400,6 +1417,12 @@ void configuration() {
                     }
                 }
                 printf("\n");
+            }
+            else {
+                printf("< configuration of redundancy in Gantt chart >\n");
+                printf("* input y to change the current configuration(otherwise, input n)\n");
+
+                if (inputYesNo("your input: ")) allow_redundancy = !allow_redundancy;
             }
         }
     }

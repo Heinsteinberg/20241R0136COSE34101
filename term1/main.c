@@ -107,7 +107,7 @@ typedef struct IOBurst {
 } IOBurst;
 
 typedef struct Process {
-    int number, PID, arrival, priority, turnaroundTime, waitingTime, lastAddedToReadyQueue;
+    int number, PID, arrival, priority, lastAddedToReadyQueue, lastRemovedFromCPU, turnaroundTime, waitingTime;
     CPUBurst CPUburst;
     IOBurst IOburst;
 } Process;
@@ -155,7 +155,7 @@ typedef struct ReadyQueue {
 ReadyQueue readyQueue_init(const SchedulingPolicy schedulingPolicy);
 bool readyQueue_empty(const ReadyQueue);
 ReadyQueueNode* readyQueue_front(const ReadyQueue);
-int readyQueue_compare(const ReadyQueue, const Process *const, const Process *const);
+bool readyQueue_compare(const ReadyQueue, const Process *const, const Process *const);
 void readyQueue_push(ReadyQueue *const, Process *const, const int);
 Process* readyQueue_pop(ReadyQueue *const);
 
@@ -424,7 +424,7 @@ ReadyQueueNode* readyQueue_front(const ReadyQueue readyQueue) {
 }
 
 // returns 1 if p1 has higher priority than p2, 0 otherwise
-int readyQueue_compare(const ReadyQueue readyQueue, const Process *const p1, const Process *const p2) {
+bool readyQueue_compare(const ReadyQueue readyQueue, const Process *const p1, const Process *const p2) {
     const SchedulingPolicy schedulingPolicy = readyQueue.schedulingPolicy;
 
     switch (schedulingPolicy.schedulingMode) {
@@ -441,10 +441,10 @@ int readyQueue_compare(const ReadyQueue readyQueue, const Process *const p1, con
             break;
         case ROUND_ROBIN:
             if (p1->lastAddedToReadyQueue == p2->lastAddedToReadyQueue) {
-                if (p1->lastAddedToReadyQueue == p1->arrival && p2->lastAddedToReadyQueue == p2->arrival) return p1->number < p2->number;
-                else if (p1->lastAddedToReadyQueue == p1->arrival) return true;
-                else if (p2->lastAddedToReadyQueue == p2->arrival) return false;
-                else return p1->number < p2->number;
+                if (p1->lastAddedToReadyQueue == p1->lastRemovedFromCPU && p2->lastAddedToReadyQueue == p2->lastRemovedFromCPU) break;
+                else if (p1->lastAddedToReadyQueue == p1->lastRemovedFromCPU) return false;
+                else if (p2->lastAddedToReadyQueue == p2->lastRemovedFromCPU) return true;
+                else break;
             }
             return p1->lastAddedToReadyQueue < p2->lastAddedToReadyQueue;
         default:
@@ -778,7 +778,7 @@ Process* inputProcess(const int number, bool isPIDoccupied[]) {
     Process *const ret = (Process*)malloc(sizeof(Process));
 
     ret->number = number;
-    ret->turnaroundTime = ret->waitingTime = ret->lastAddedToReadyQueue = -1;
+    ret->lastAddedToReadyQueue = ret->lastRemovedFromCPU = ret->turnaroundTime = ret->waitingTime = -1;
     printf("< P%d's data options >\n", ret->number);
     printf("[1] input manually\n");
     printf("[2] input randomly\n");
@@ -1059,6 +1059,7 @@ void simulate(Simulation *ret) {
 
                 if (readyQueue_compare(readyQueue, tmp, running)) {
                     readyQueue_push(&readyQueue, running, t);
+                    running->lastRemovedFromCPU = t;
                     // printf("t=%d: P%d is preempted by %d\n", t, running->number, tmp->number);
                     running = readyQueue_pop(&readyQueue);
                 }
@@ -1089,6 +1090,7 @@ void simulate(Simulation *ret) {
                         break;
                     }
                 }
+                running->lastRemovedFromCPU = t + 1;
                 running->turnaroundTime = t + 1 - running->arrival;
                 running->waitingTime = t + 1 - running->arrival - running->CPUburst.burst;
                 for (int i = 0; i < running->IOburst.num; i++) running->waitingTime -= running->IOburst.io[i].burst;
@@ -1099,6 +1101,7 @@ void simulate(Simulation *ret) {
             else if (running->IOburst.num > 0 && running->IOburst.idx < running->IOburst.num) {
                 if (--(running->IOburst.io[running->IOburst.idx].remaining1) == 0) {
                     list_push(&waitingQueue, running);
+                    running->lastRemovedFromCPU = t + 1;
                     // printf("t=%d: P%d is added to waiting queue from CPU\n", t + 1, running->number);
                     ((GanttData*)(ret->GanttList.rear->data))->end = t + 1; // assign the ending time
                     running = NULL;
@@ -1109,6 +1112,7 @@ void simulate(Simulation *ret) {
             else {
                 if (schedulingPolicy.isTimeoutMode && --timer == 0) {
                     readyQueue_push(&readyQueue, running, t + 1);
+                    running->lastRemovedFromCPU = t + 1;
                     // printf("t=%d: P%d is timed out\n", t + 1, running->number);
                     running = NULL;
                     timer = schedulingPolicy.timeQuantum;

@@ -440,18 +440,21 @@ int readyQueue_compare(const ReadyQueue readyQueue, const Process *const p1, con
             if (p1->priority != p2->priority) return schedulingPolicy.priorityDirection == ASCENDING ? p1->priority < p2->priority : p1->priority > p2->priority;
             break;
         case ROUND_ROBIN:
-            break;
+            if (p1->lastAddedToReadyQueue == p2->lastAddedToReadyQueue) {
+                if (p1->lastAddedToReadyQueue == p1->arrival && p2->lastAddedToReadyQueue == p2->arrival) return p1->number < p2->number;
+                else if (p1->lastAddedToReadyQueue == p1->arrival) return true;
+                else if (p2->lastAddedToReadyQueue == p2->arrival) return false;
+                else return p1->number < p2->number;
+            }
+            return p1->lastAddedToReadyQueue < p2->lastAddedToReadyQueue;
         default:
             fprintf(stderr, "ERROR: UNDEFINED SCHEDULING MODE DETECTED IN COMPARING\n");
             exit(1);
     }
 
-    // tie breaker(overhead time is not considered)
-    if (p1->lastAddedToReadyQueue == p2->lastAddedToReadyQueue) {
-        if (p1->arrival == p2->arrival) return p1->number < p2->number;
-        return p1->arrival < p2->arrival;
-    }
-    return p1->lastAddedToReadyQueue < p2->lastAddedToReadyQueue;
+    // tie breaker
+    if (p1->arrival == p2->arrival) return p1->number < p2->number;
+    return p1->arrival < p2->arrival;
 }
 
 void readyQueue_push(ReadyQueue *const readyQueue, Process *const process, const int t) {

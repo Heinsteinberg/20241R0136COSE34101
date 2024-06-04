@@ -423,7 +423,7 @@ ReadyQueueNode* readyQueue_front(const ReadyQueue readyQueue) {
     return NULL;
 }
 
-// returns 1 if p1 has higher priority than p2, 0 otherwise
+// returns true if p1 has higher priority than p2, false otherwise
 bool readyQueue_compare(const ReadyQueue readyQueue, const Process *const p1, const Process *const p2) {
     const SchedulingPolicy schedulingPolicy = readyQueue.schedulingPolicy;
 

@@ -185,7 +185,7 @@ void simulate(Simulation*);
 SimulationBatch* selectSimulationBatch(const List);
 
 void showProcessInfo(const Process, const bool, FILE *const);
-void showProcessesInfo(const List, const bool, const bool, FILE *const);
+void showProcessListInfo(const List, const bool, const bool, FILE *const);
 int intDigits(const int);
 void printCharSequence(const char, const int, FILE *const);
 void showGanttChart(const List, const bool, const bool, FILE *const);
@@ -429,7 +429,6 @@ bool readyQueue_compare(const ReadyQueue readyQueue, const Process *const p1, co
 
     switch (schedulingPolicy.schedulingMode) {
         case FCFS:
-            if (p1->arrival != p2->arrival) return p1->arrival < p2->arrival;
             break;
         case NON_PREEMPTIVE_SJF:
         case PREEMPTIVE_SJF:
@@ -441,10 +440,9 @@ bool readyQueue_compare(const ReadyQueue readyQueue, const Process *const p1, co
             break;
         case ROUND_ROBIN:
             if (p1->lastAddedToReadyQueue == p2->lastAddedToReadyQueue) {
-                if (p1->lastAddedToReadyQueue == p1->lastRemovedFromCPU && p2->lastAddedToReadyQueue == p2->lastRemovedFromCPU) break;
-                else if (p1->lastAddedToReadyQueue == p1->lastRemovedFromCPU) return false;
-                else if (p2->lastAddedToReadyQueue == p2->lastRemovedFromCPU) return true;
-                else break;
+                if (p1->lastAddedToReadyQueue == p1->lastRemovedFromCPU && p2->lastAddedToReadyQueue != p2->lastRemovedFromCPU) return false;
+                if (p2->lastAddedToReadyQueue == p2->lastRemovedFromCPU && p2->lastAddedToReadyQueue != p2->lastRemovedFromCPU) return true;
+                break;
             }
             return p1->lastAddedToReadyQueue < p2->lastAddedToReadyQueue;
         default:
@@ -895,8 +893,6 @@ Process* inputProcess(const int number, bool isPIDoccupied[]) {
                 ret->IOburst.num = ret->IOburst.idx = 0;
                 for (int t = 0;;) {
                     if (t != 0) {
-                        char selection;
-
                         printf("* input y to add IO-burst(otherwise, input n)\n");
                         if (!inputYesNo("your input: ")) break;
                         printf("\n");
@@ -912,8 +908,6 @@ Process* inputProcess(const int number, bool isPIDoccupied[]) {
                             t += input2;
                             break;
                         }
-                        else if (input2 == 0) printf("* prior CPU-burst should not be zero!\n");
-                        else printf("* prior CPU-burst should not exceed the total CPU-burst time!\n");
                     }
                     printf("\n");
 
@@ -941,8 +935,9 @@ Process* inputProcess(const int number, bool isPIDoccupied[]) {
                 break;
             }
         }
-        printf("\n");
     }
+    else printf("* skipped IO-burst options since CPU-burst should be greater than 1\n");
+    printf("\n");
 
     return ret;
 }
@@ -980,9 +975,9 @@ ProcessData* selectProcessData(List *const processDataList) {
         const List processList = ((ProcessData*)(node->data))->processList;
 
         printf("[%d] %d process%s\n", ++i, processList.size, processList.size == 1 ? "" : "es");
-        showProcessesInfo(processList, NO_HEADER, NO_LAST_NEWLINE, stdout);
+        showProcessListInfo(processList, NO_HEADER, NO_LAST_NEWLINE, stdout);
     }
-    printf("* press enter to create new process data\n");
+    printf("* press enter to create a new process data\n");
 
     while (true) {
         const int input = inputNaturalNumber("your input: ", ALLOW_EMPTY_INPUT);
@@ -1120,7 +1115,7 @@ void simulate(Simulation *ret) {
             }
         }
     }
-    printf("simulation completed\n");
+    printf("* simulation completed\n");
     printf("\n");
 }
 
@@ -1191,7 +1186,7 @@ void showProcessInfo(const Process process, const bool includeHeader, FILE *cons
 }
 
 // shows a set of processes
-void showProcessesInfo(const List processList, const bool includeHeader, const bool includeLastNewline, FILE *const _Stream) {
+void showProcessListInfo(const List processList, const bool includeHeader, const bool includeLastNewline, FILE *const _Stream) {
     if (includeHeader) fprintf(_Stream, "----- process%s information -----\n", processList.size == 1 ? "" : "es");
     fprintf(_Stream, "process   PID   arrival   priority   CPU-burst   IO-burst\n");
     for (Node *node = processList.front; node != NULL; node = node->nxt) showProcessInfo(*(Process*)(node->data), NO_HEADER, _Stream);
@@ -1328,7 +1323,7 @@ void showSimulationBatchResult(const SimulationBatch simulationBatch, FILE *cons
     const tm_t tm = simulationBatch.tm;
 
     fprintf(_Stream, "%04d/%02d/%02d %02d:%02d:%02d\n", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
-    showProcessesInfo(simulationBatch.processData.processList, INCLUDE_HEADER, INCLUDE_LAST_NEWLINE, _Stream);
+    showProcessListInfo(simulationBatch.processData.processList, INCLUDE_HEADER, INCLUDE_LAST_NEWLINE, _Stream);
     
     int i = 0;
 
@@ -1432,7 +1427,7 @@ void configuration() {
                 printf("* valid input range: %d-%d\n", MIN_GANTT_CHART_WIDTH, MAX_GANTT_CHART_WIDTH);
                 printf("* press enter to skip\n");
                 while (true) {
-                    int input = inputNaturalNumber("your input: ", ALLOW_EMPTY_INPUT);
+                    const int input = inputNaturalNumber("your input: ", ALLOW_EMPTY_INPUT);
 
                     if (input == -1) break;
                     else if (input >= MIN_GANTT_CHART_WIDTH && input <= MAX_GANTT_CHART_WIDTH) {
